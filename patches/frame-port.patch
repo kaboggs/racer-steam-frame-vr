@@ -1,0 +1,328 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 16bfb71..331aebb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -11,7 +11,6 @@ if (MINGW)
+             -Wno-multichar
+             -Werror=incompatible-pointer-types
+             -Werror=implicit-function-declaration
+-            -mfpmath=387
+     )
+ endif()
+ 
+@@ -56,7 +55,7 @@ add_dependencies(swe1r_functions generate_global_h)
+ target_include_directories(swe1r_functions PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+ target_include_directories(swe1r_functions PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/generated)
+ target_compile_definitions(swe1r_functions PUBLIC GLFW_INCLUDE_NONE=1)
+-target_link_libraries(swe1r_functions PUBLIC swe1r_globals winmm Comctl32 glad glfw dxguid)
++target_link_libraries(swe1r_functions PUBLIC swe1r_globals winmm comctl32 glad glfw dxguid)
+ 
+ # based on $SOURCES, generate the hooked functions
+ set(HOOK_HEADER_FILES "")
+diff --git a/dinput_hook/CMakeLists.txt b/dinput_hook/CMakeLists.txt
+index 51e371f..e960053 100644
+--- a/dinput_hook/CMakeLists.txt
++++ b/dinput_hook/CMakeLists.txt
+@@ -63,7 +63,7 @@ if (NOT USE_RELEASE_HOOK)
+     target_include_directories(dinput_hook PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+     target_compile_definitions(dinput_hook PRIVATE ENABLE_GLFW_INPUT_HANDLING=0)
+     target_compile_definitions(dinput_hook PRIVATE ENABLE_GAMEPAD_NAV=1)
+-    target_link_libraries(dinput_hook PRIVATE swe1r_functions swe1r_globals imgui kernel32  Dwmapi dxguid detours ddraw opengl32 glad glfw fastgltf)
++    target_link_libraries(dinput_hook PRIVATE swe1r_functions swe1r_globals imgui kernel32  dwmapi dxguid detours ddraw opengl32 glad glfw fastgltf)
+     target_link_options(dinput_hook PRIVATE "-Wl,--kill-at")
+ 
+     if (GAME_DIR)
+diff --git a/dinput_hook/crash_logger.cpp b/dinput_hook/crash_logger.cpp
+index 3efcd2e..0803c86 100644
+--- a/dinput_hook/crash_logger.cpp
++++ b/dinput_hook/crash_logger.cpp
+@@ -151,7 +151,7 @@ static void log_stack_scan(HANDLE out, UINT_PTR esp) {
+     }
+ }
+ 
+-static void write_exception_report(HANDLE out, const EXCEPTION_RECORD *er, UINT_PTR esp) {
++static void write_exception_report(HANDLE out, const EXCEPTION_RECORD *er, UINT_PTR esp, const CONTEXT *ctx) {
+     write_fmt(out, "*** unhandled exception: code=0x%08lx addr=%p ***\n", er->ExceptionCode,
+               er->ExceptionAddress);
+     write_env_line(out);
+@@ -165,6 +165,15 @@ static void write_exception_report(HANDLE out, const EXCEPTION_RECORD *er, UINT_
+     }
+     write_fmt(out, "  faulting instruction:\n");
+     log_addr(out, er->ExceptionAddress);
++    if (ctx) {
++        write_fmt(out, "  registers: eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx esi=%08lx edi=%08lx ebp=%08lx esp=%08lx\n",
++                  ctx->Eax, ctx->Ebx, ctx->Ecx, ctx->Edx, ctx->Esi, ctx->Edi, ctx->Ebp, ctx->Esp);
++    }
++    const unsigned char *code = (const unsigned char *)er->ExceptionAddress;
++    if (!IsBadReadPtr(code - 16, 48)) {
++        write_fmt(out, "  instruction bytes from fault-16:\n");
++        for (int i = -16; i < 32; ++i) write_fmt(out, "%02x%s", code[i], (i+17)%16 ? " " : "\n");
++    }
+     log_stack_scan(out, esp);
+     write_fmt(out, "*** end crash report ***\n");
+ }
+@@ -217,7 +226,7 @@ static void report_crash(EXCEPTION_POINTERS *ep) {
+     char path[MAX_PATH] = {0};
+     HANDLE cf = open_report_file("crash", path, sizeof(path));
+     if (cf != INVALID_HANDLE_VALUE) {
+-        write_exception_report(cf, er, esp);
++        write_exception_report(cf, er, esp, ep->ContextRecord);
+         CloseHandle(cf);
+     }
+ 
+@@ -233,7 +242,7 @@ static void report_crash(EXCEPTION_POINTERS *ep) {
+         } else {
+             // Crash file could not be created -- append the full report to hook.log's OS handle
+             // (WriteFile, no heap lock), landing after the just-flushed pre-crash lines.
+-            write_exception_report(hook_log_handle(), er, esp);
++            write_exception_report(hook_log_handle(), er, esp, ep->ContextRecord);
+         }
+     }
+ }
+diff --git a/dinput_hook/game_deltas/Window_delta.c b/dinput_hook/game_deltas/Window_delta.c
+index 14ef04c..c35cfc0 100644
+--- a/dinput_hook/game_deltas/Window_delta.c
++++ b/dinput_hook/game_deltas/Window_delta.c
+@@ -4,7 +4,7 @@
+ #include "../vr_probe.h"// vr_perf_mark (frame timeline)
+ 
+ #include <stdio.h>
+-#include <Windows.h>
++#include <windows.h>
+ #include <commctrl.h>
+ 
+ #include "globals.h"
+@@ -563,7 +563,7 @@ int Window_Main_delta(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLin
+ 
+     {// Core compatibility for RenderDocs
+         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
++        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+         glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);// OpenGL debug callback
+     }
+diff --git a/dinput_hook/game_deltas/swrObjJdge_delta.cpp b/dinput_hook/game_deltas/swrObjJdge_delta.cpp
+index cebff9b..512bd4b 100644
+--- a/dinput_hook/game_deltas/swrObjJdge_delta.cpp
++++ b/dinput_hook/game_deltas/swrObjJdge_delta.cpp
+@@ -101,8 +101,10 @@ static void reset_lap_tracking(swrScore *scores); // 100-lap support, defined be
+ 
+ unsigned int swrObjJdge_InitTrack_delta(swrObjJdge *judge, swrScore *scores) {
+     // Drop cable nodes from the previous track so freed pointers aren't matched against new meshes.
++    fprintf(hook_log, "[Frame transition] track init begin\n"); fflush(hook_log);
+     swrRace_ClearCableBends();
+     const unsigned int x = hook_call_original(swrObjJdge_InitTrack, judge, scores);
++    fprintf(hook_log, "[Frame transition] track init original returned\n"); fflush(hook_log);
+     reset_lap_tracking(scores);
+     capture_scene_animation_state();// record fresh animation state for a later fast restart
+     g_countdown_ms = judge->countdownTimer_ms;// fresh countdown duration ('Begn' latched it above)
+@@ -233,12 +235,21 @@ static void vr_menu_key(int vk, bool down, int slot) {
+     if (down && !was[slot]) {
+         fire = true;
+         repeat[slot] = 22;// initial delay before auto-repeat, in frames
+-    } else if (down && --repeat[slot] <= 0) {
++    } else if (down && slot < 4 && --repeat[slot] <= 0) {
+         fire = true;
+         repeat[slot] = 6;
+     }
+     if (fire) {
+-        ((swrUI_HandleKeyEventFn2) swrUI_HandleKeyEvent_ADDR)(vk, 1);
++        int handled = ((swrUI_HandleKeyEventFn2) swrUI_HandleKeyEvent_ADDR)(vk, 1);
++        if (slot == 4) {
++            fprintf(hook_log, "[Frame menu] confirm down: handled=%d controlsActive=%d held=%d counter=%d\n",
++                    handled, stdControl_bControlsActive, stdControl_aKeyInfos[VRK_ENTER],
++                    stdControl_g_aKeyPressCounter[VRK_ENTER]);
++            fflush(hook_log);
++        }
++    } else if (!down && was[slot]) {
++        // Match a real keyboard: release on the controller's release frame.
++        // Sending down and up together can clear queued UI input before it is consumed.
+         ((swrUI_HandleKeyEventFn2) swrUI_HandleKeyEvent_ADDR)(vk, 0);
+     }
+     was[slot] = down;
+@@ -313,6 +324,16 @@ static void autorace_tick(void) {
+ void stdControl_ReadControls_boostfix_delta(void) {
+     vr_perf_mark("readControls");
+     autorace_tick();
++    {
++        swrObjHang *hang = (swrObjHang *) ((swrEvent_GetItemFn2) swrEvent_GetItem_ADDR)(0x48616e67, 0);
++        static int lastScreen = -999;
++        int screen = hang ? (int)hang->menuScreen : -1;
++        if (screen != lastScreen) {
++            fprintf(hook_log, "[Frame transition] hang screen=%d previous=%d\n", screen,
++                    hang ? (int)hang->menuScreenPrev : -1);
++            fflush(hook_log); lastScreen = screen;
++        }
++    }
+     hook_call_original((stdControl_ReadControls_t) stdControl_ReadControls_ADDR);
+ 
+     // With a wheel attached the game's own joystick handling makes menus unusable: the
+@@ -785,7 +806,7 @@ void stdControl_ReadControls_boostfix_delta(void) {
+         vr_hold_key(VRK_ROLLR, vr_input_roll_right() != 0 || wbtn[9]);
+         // Menu confirm/cancel ride the same buttons; the front end uses the event path below,
+         // and these scancodes mean nothing to it, so the two cannot collide.
+-        vr_hold_key(VRK_ENTER, vr_input_boost() != 0 || wbtn[3] || wbtn[10]);
++        vr_hold_key(VRK_ENTER, vr_input_boost() != 0 || vr_input_throttle() > 0.65f || wbtn[3] || wbtn[10]);
+         // Escape from either button, unconditionally.
+         vr_hold_key(VRK_ESC, vr_input_menu() != 0 || cancel_btn || wbtn[4]);
+ 
+@@ -812,7 +833,7 @@ void stdControl_ReadControls_boostfix_delta(void) {
+         vr_menu_key(VRVK_DOWN, menu_y < -deadzone || wdp_d, 1);
+         vr_menu_key(VRVK_LEFT, menu_x < -deadzone || wdp_l, 2);
+         vr_menu_key(VRVK_RIGHT, menu_x > deadzone || wdp_r, 3);
+-        vr_menu_key(VRVK_RETURN, vr_input_boost() != 0 || wbtn[3] || wbtn[10], 4);
++        vr_menu_key(VRVK_RETURN, vr_input_boost() != 0 || vr_input_throttle() > 0.65f || wbtn[3] || wbtn[10], 4);
+         vr_menu_key(VRVK_ESCAPE, cancel_btn || vr_input_menu() != 0 || wbtn[4], 5);
+ 
+         // A control-type debug print lived here and crashed the game at the end of every
+diff --git a/dinput_hook/imgui-1.91.1/examples/example_win32_opengl3/main.cpp b/dinput_hook/imgui-1.91.1/examples/example_win32_opengl3/main.cpp
+index 8ecd27a..022c802 100644
+--- a/dinput_hook/imgui-1.91.1/examples/example_win32_opengl3/main.cpp
++++ b/dinput_hook/imgui-1.91.1/examples/example_win32_opengl3/main.cpp
+@@ -15,7 +15,7 @@
+ #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+-#include <GL/GL.h>
++#include <GL/gl.h>
+ #include <tchar.h>
+ 
+ // Data stored per platform window
+diff --git a/dinput_hook/imgui-1.91.1/imgui.cpp b/dinput_hook/imgui-1.91.1/imgui.cpp
+index ac76ddd..98f85a9 100644
+--- a/dinput_hook/imgui-1.91.1/imgui.cpp
++++ b/dinput_hook/imgui-1.91.1/imgui.cpp
+@@ -1060,7 +1060,7 @@ CODE
+ #define NOMINMAX
+ #endif
+ #ifndef __MINGW32__
+-#include <Windows.h>        // _wfopen, OpenClipboard
++#include <windows.h>        // _wfopen, OpenClipboard
+ #else
+ #include <windows.h>
+ #endif
+diff --git a/dinput_hook/n64_shader.cpp b/dinput_hook/n64_shader.cpp
+index baa96b8..749b963 100644
+--- a/dinput_hook/n64_shader.cpp
++++ b/dinput_hook/n64_shader.cpp
+@@ -299,7 +299,7 @@ get_or_compile_color_combine_shader(ImGuiState &state,
+     const char *vertex_shader_source = vertex_shader_source_s.c_str();
+     const char *fragment_shader_source = fragment_shader_source_s.c_str();
+ 
+-    const char *fragment_sources[]{"#version 450 core\n", defines.c_str(), fragment_shader_source};
++    const char *fragment_sources[]{"#version 430 core\n", defines.c_str(), fragment_shader_source};
+ 
+     std::optional<GLuint> program_opt = compileProgram(
+         1, &vertex_shader_source, std::size(fragment_sources), std::data(fragment_sources));
+diff --git a/dinput_hook/node_utils.cpp b/dinput_hook/node_utils.cpp
+index 89e976e..f330cf8 100644
+--- a/dinput_hook/node_utils.cpp
++++ b/dinput_hook/node_utils.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ #include "node_utils.h"
+ 
+ #include <map>
+diff --git a/dinput_hook/renderer_hook.cpp b/dinput_hook/renderer_hook.cpp
+index 59ddce1..2d29a24 100644
+--- a/dinput_hook/renderer_hook.cpp
++++ b/dinput_hook/renderer_hook.cpp
+@@ -3709,6 +3709,29 @@ extern "C" void swrPlayerHUD_RenderWorldSprites_delta(void *viewport, int second
+         secondaryPass);
+ }
+ 
++// Built-in tracks use the game's original menu implementation, retaining its
++// artwork setup/teardown lifecycle. Custom tracks keep the fork's extended menus.
++static bool frame_stock_menu(swrObjHang *hang) {
++    return hang && (unsigned char)hang->track_index < 25;
++}
++static void frame_course_info_menu(swrObjHang *hang) {
++    if (frame_stock_menu(hang)) {
++        static bool said = false;
++        if (!said) { fprintf(hook_log, "[Frame transition] original stock course-info menu\n"); fflush(hook_log); said = true; }
++        hook_call_original((void(__cdecl *)(swrObjHang *))swrRace_CourseInfoMenu_ADDR, hang);
++    } else swrRace_CourseInfoMenu_delta(hang);
++}
++static void frame_main_menu(swrObjHang *hang) {
++    if (frame_stock_menu(hang))
++        hook_call_original((void(__cdecl *)(swrObjHang *))swrRace_MainMenu_ADDR, hang);
++    else swrRace_MainMenu_delta(hang);
++}
++static void frame_course_selection_menu() {
++    if (frame_stock_menu(g_objHang2))
++        hook_call_original((void(__cdecl *)())swrRace_CourseSelectionMenu_ADDR);
++    else swrRace_CourseSelectionMenu_delta();
++}
++
+ extern "C" int stdDisplay_Update_Hook() {
+     if (swrDisplay_SkipNextFrameUpdate == 1) {
+         swrDisplay_SkipNextFrameUpdate = 0;
+@@ -3983,6 +4006,7 @@ extern "C" int Window_PlayCinematic_delta(char **znmFile) {
+         name = "";
+     const bool is_startup = std::strstr(name, "Goldie") || std::strstr(name, "TextCrawl") ||
+                             std::strstr(name, "IntroScene");
++    fprintf(hook_log, "[Frame transition] cinematic begin: %s\n", name); fflush(hook_log);
+     int result = 1;// nonzero == handled
+     if (!(is_startup ? cutscene_should_skip_startup_movies()
+                      : cutscene_should_skip_prerace_cinematic())) {
+@@ -4006,6 +4030,7 @@ extern "C" int Window_PlayCinematic_delta(char **znmFile) {
+     // race then spins up inside the same LoadScreen, and swrObjJdge_F0 would read that stale edge
+     // and skip the pre-race track sweep too (and one tap could skip several chained startup movies).
+     g_cutscene_skip_edge = 0;
++    fprintf(hook_log, "[Frame transition] cinematic end: %s result=%d\n", name, result); fflush(hook_log);
+     return result;
+ }
+ 
+@@ -4614,11 +4639,11 @@ extern "C" void init_renderer_hooks() {
+                   (uint8_t *) swrObjJdge_UpdateStandings_delta);
+ 
+     hook_function("swrRace_CourseSelectionMenu", (uint32_t) swrRace_CourseSelectionMenu_ADDR,
+-                  (uint8_t *) swrRace_CourseSelectionMenu_delta);
++                  (uint8_t *) frame_course_selection_menu);
+     hook_function("swrRace_CourseInfoMenu", (uint32_t) swrRace_CourseInfoMenu_ADDR,
+-                  (uint8_t *) swrRace_CourseInfoMenu_delta);
++                  (uint8_t *) frame_course_info_menu);
+     hook_function("swrRace_MainMenu", (uint32_t) swrRace_MainMenu_ADDR,
+-                  (uint8_t *) swrRace_MainMenu_delta);
++                  (uint8_t *) frame_main_menu);
+     hook_function("DrawTracks", (uint32_t) DrawTracks_ADDR, (uint8_t *) DrawTracks_delta);
+ 
+     // swrModel_LoadFromId is already hooked for model replacement
+diff --git a/src/Platform/a3d.c b/src/Platform/a3d.c
+index 602ec7d..4e67392 100644
+--- a/src/Platform/a3d.c
++++ b/src/Platform/a3d.c
+@@ -1,6 +1,6 @@
+ #include "a3d.h"
+ 
+-#include "Winreg.h"
++#include "winreg.h"
+ 
+ #include "globals.h"
+ 
+diff --git a/src/Win95/Window.c b/src/Win95/Window.c
+index 90ac465..8cb1f0d 100644
+--- a/src/Win95/Window.c
++++ b/src/Win95/Window.c
+@@ -1,6 +1,6 @@
+ #include "Window.h"
+ 
+-#include <Windows.h>
++#include <windows.h>
+ #include <commctrl.h>
+ 
+ #include "globals.h"
+diff --git a/src/types_a3d.h b/src/types_a3d.h
+index c5cb2dc..cb460ce 100644
+--- a/src/types_a3d.h
++++ b/src/types_a3d.h
+@@ -4,7 +4,7 @@
+ // From https://github.com/RazorbladeByte/A3D-Live-/blob/master/ia3dapi.h
+ // See the api book: http://www.worknd.ru/a3d30ref.pdf
+ 
+-#include <Windows.h>
++#include <windows.h>
+ 
+ // Feature flags
+ #define A3D_1ST_REFLECTIONS 0x00000002
+  
