@@ -1,0 +1,12 @@
+.cache/
+build/
+dist/
+__pycache__/
+*.pyc
+*.log
+*.dll
+*.exe
+*.zip
+*.tar.*
+backups/
+  
