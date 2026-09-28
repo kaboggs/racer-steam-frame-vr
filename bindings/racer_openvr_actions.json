@@ -1,0 +1,55 @@
+{
+  "action_sets": [
+    {
+      "name": "/actions/racer",
+      "usage": "leftright"
+    }
+  ],
+  "actions": [
+    {
+      "name": "/actions/racer/in/stick",
+      "type": "vector2",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/racer/in/trigger",
+      "type": "vector1",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/racer/in/grip",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/racer/in/primary",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/racer/in/secondary",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/racer/in/stick_click",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/racer/in/menu",
+      "type": "boolean",
+      "requirement": "optional"
+    }
+  ],
+  "default_bindings": [
+    {
+      "controller_type": "frame_controller",
+      "binding_url": "racer_frame_bindings.json"
+    },
+    {
+      "controller_type": "oculus_touch",
+      "binding_url": "racer_frame_bindings.json"
+    }
+  ]
+}  
